@@ -52,7 +52,7 @@ export function SignMessage() {
         signMessage({ message: "nostr:" + address });
       }}
     >
-      <button disabled={isLoading}>{isLoading ? "Check Wallet" : "Sign Message"}</button>
+      <button disabled={isLoading}>{isLoading ? "Check Wallet" : "Signup Nostr Account"}</button>
 
       {data && (
         <div>
