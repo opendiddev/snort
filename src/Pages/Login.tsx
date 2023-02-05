@@ -1,119 +1,86 @@
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { useNavigate } from "react-router-dom";
-import * as secp from '@noble/secp256k1';
 
 import { RootState } from "State/Store";
 import { setPrivateKey, setPublicKey, setRelays, setGeneratedPrivateKey } from "State/Login";
-import { DefaultRelays, EmailRegex } from "Const";
-import { bech32ToHex } from "Util";
+
+import { WagmiConfig, createClient, useAccount, useSignMessage } from "wagmi";
+import { ConnectKitProvider, ConnectKitButton, getDefaultClient } from "connectkit";
+
+import { keccak256, verifyMessage } from "ethers/lib/utils.js";
+
 import { HexKey } from "Nostr";
 
-export default function LoginPage() {
-    const dispatch = useDispatch();
-    const navigate = useNavigate();
-    const publicKey = useSelector<RootState, HexKey | undefined>(s => s.login.publicKey);
-    const [key, setKey] = useState("");
-    const [error, setError] = useState("");
+import * as secp from "@noble/secp256k1";
 
-    useEffect(() => {
-        if (publicKey) {
-            navigate("/");
-        }
-    }, [publicKey, navigate]);
+const alchemyId = "nvA9V3DRP81ZY4O-NHAdjUMO9HtjGV48";
 
-    async function getNip05PubKey(addr: string) {
-        let [username, domain] = addr.split("@");
-        let rsp = await fetch(`https://${domain}/.well-known/nostr.json?name=${encodeURIComponent(username)}`);
-        if (rsp.ok) {
-            let data = await rsp.json();
-            let pKey = data.names[username];
-            if (pKey) {
-                return pKey;
-            }
-        }
-        throw new Error("User key not found")
-    }
+const client = createClient(
+  getDefaultClient({
+    appName: "NOSTR",
+    alchemyId,
+  })
+);
 
-    async function doLogin() {
+export function SignMessage() {
+  const recoveredAddress = useRef<string>();
+  const [pubKey, setPubKey] = useState<string>("");
+  const { address } = useAccount();
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const { data, error, isLoading, signMessage } = useSignMessage({
+    onSuccess(data, variables) {
+      // Verify signature when sign message succeeds
+      const address = verifyMessage(variables.message, data);
+      recoveredAddress.current = address;
+      const sec = data.substring(2, 66);
+      const pub = secp.utils.bytesToHex(secp.schnorr.getPublicKey(sec));
+      console.log("data", sec, "pub", pub, secp.utils.isValidPrivateKey(sec));
+      if (secp.utils.isValidPrivateKey(sec)) {
+        dispatch(setPrivateKey(sec));
+        setPubKey(pub);
+        navigate(`/p/${pub}`);
+      }
+    },
+  });
 
-        try {
-            if (key.startsWith("nsec")) {
-                let hexKey = bech32ToHex(key);
-                if (secp.utils.isValidPrivateKey(hexKey)) {
-                    dispatch(setPrivateKey(hexKey));
-                } else {
-                    throw new Error("INVALID PRIVATE KEY");
-                }
-            } else if (key.startsWith("npub")) {
-                let hexKey = bech32ToHex(key);
-                dispatch(setPublicKey(hexKey));
-            } else if (key.match(EmailRegex)) {
-                let hexKey = await getNip05PubKey(key);
-                dispatch(setPublicKey(hexKey));
-            } else {
-                if (secp.utils.isValidPrivateKey(key)) {
-                    dispatch(setPrivateKey(key));
-                } else {
-                    throw new Error("INVALID PRIVATE KEY");
-                }
-            }
-        } catch (e) {
-            setError(`Failed to load NIP-05 pub key (${e})`);
-            console.error(e);
-        }
-    }
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        signMessage({ message: "nostr:" + address });
+      }}
+    >
+      <button disabled={isLoading}>{isLoading ? "Check Wallet" : "Sign Message"}</button>
 
-    async function makeRandomKey() {
-        let newKey = secp.utils.bytesToHex(secp.utils.randomPrivateKey());
-        dispatch(setGeneratedPrivateKey(newKey));
-        navigate("/new");
-    }
-
-    async function doNip07Login() {
-        let pubKey = await window.nostr.getPublicKey();
-        dispatch(setPublicKey(pubKey));
-
-        if ("getRelays" in window.nostr) {
-            let relays = await window.nostr.getRelays();
-            dispatch(setRelays({
-                relays: {
-                    ...relays,
-                    ...Object.fromEntries(DefaultRelays.entries())
-                },
-                createdAt: 1
-            }));
-        }
-    }
-
-    function altLogins() {
-        let nip07 = 'nostr' in window;
-        if (!nip07) {
-            return null;
-        }
-
-        return (
-            <>
-                <h2>Other Login Methods</h2>
-                <div className="flex">
-                    <button type="button" onClick={(e) => doNip07Login()}>Login with Extension (NIP-07)</button>
-                </div>
-            </>
-        )
-    }
-
-    return (
-        <div className="main-content">
-            <h1>Login</h1>
-            <div className="flex">
-                <input type="text" placeholder="nsec / npub / nip-05 / hex private key..." className="f-grow" onChange={e => setKey(e.target.value)} />
-            </div>
-            {error.length > 0 ? <b className="error">{error}</b> : null}
-            <div className="tabs">
-                <button type="button" onClick={(e) => doLogin()}>Login</button>
-                <button type="button" onClick={() => makeRandomKey()}>Generate Key</button>
-            </div>
-            {altLogins()}
+      {data && (
+        <div>
+          <div>Recovered Address: {recoveredAddress.current}</div>
+          <div>Signature: {data}</div>
+          <div>nostr pub: {pubKey}</div>
         </div>
-    );
+      )}
+
+      {error && <div>{error.message}</div>}
+    </form>
+  );
 }
+
+export default () => {
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const publicKey = useSelector<RootState, HexKey | undefined>((s) => s.login.publicKey);
+  const [key, setKey] = useState("");
+  const [error, setError] = useState("");
+  const { address, isConnected } = useAccount();
+
+  return (
+    <WagmiConfig client={client}>
+      <ConnectKitProvider>
+        {!isConnected && <ConnectKitButton label="Connect Wallet" mode="dark" />}
+        {isConnected && <SignMessage></SignMessage>}
+      </ConnectKitProvider>
+    </WagmiConfig>
+  );
+};
