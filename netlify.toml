@@ -12,7 +12,7 @@
     publish = "build-output/"
 
     # Default build command.
-    command = "yarn start"
+    command = "yarn build"
 [build.environment]
     ci='false'
 [[redirects]]
