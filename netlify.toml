@@ -19,6 +19,6 @@
     from = "/nostr"
     to = "/"
 [[redirects]]
-    from = "/"
+    from = "/home"
     to = "https://opendid-testnet.me/"
-    force = 'true'
+    force = true
